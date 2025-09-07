@@ -1,3 +1,4 @@
+
 # 🏥 Medical Assistant API
 
 This project is a **microservice-based medical assistant API** built with **FastAPI**, **LangChain**, and **Hugging Face-hosted models**. It helps:
@@ -25,6 +26,13 @@ This project is a **microservice-based medical assistant API** built with **Fast
 
   * Indian medicine database built-in.
   * Handles queries in simple English/Hinglish.
+
+---
+
+## 🌐 Base URL
+
+The API is deployed and publicly available here:
+ **[https://medical-api-endpoints.onrender.com/](https://medical-api-endpoints.onrender.com/)**
 
 ---
 
@@ -73,7 +81,6 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-
 ### 3. Environment variables
 
 Create `.env`:
@@ -91,6 +98,7 @@ APP_PORT=8080
 uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
+
 ---
 
 ## 📡 API Endpoints
@@ -98,6 +106,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ### `GET /health`
 
 Quick liveness probe.
+**Response**
 
 ```json
 {"status":"ok"}
@@ -107,7 +116,7 @@ Quick liveness probe.
 
 ### `POST /summarize-prescription`
 
-**Input**: OCR text from prescription.
+**Input**
 
 ```json
 {
@@ -115,7 +124,7 @@ Quick liveness probe.
 }
 ```
 
-**Response** (structured summary):
+**Response**
 
 ```json
 {
@@ -157,7 +166,7 @@ Quick liveness probe.
 
 ### `POST /answer-query`
 
-**Input**: User query + optional prescription summary JSON.
+**Input**
 
 ```json
 {
@@ -194,7 +203,7 @@ Quick liveness probe.
 }
 ```
 
-**Response**:
+**Response**
 
 ```json
 {
@@ -212,12 +221,10 @@ Quick liveness probe.
 ```
 
 
-
 ## 🔒 Safety Mechanisms
 
 * **Prefilter**: Blocks unsafe queries (self-harm, overdose).
 * **Refiner**: GPT-OSS ensures consistent JSON + patient-friendly tone.
 * **Safety Footer**: Always appends disclaimers and India-specific emergency contact.
-
 
 
