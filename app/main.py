@@ -91,7 +91,7 @@ async def answer_query(payload: AnswerQueryRequest):
         json_str = refine_answer_to_json(draft_paragraph, sources_text=sources_text)
 
         # 3) Parse JSON and finalize
-        from app.utils.json_extract import extract_first_json
+        
         try:
             obj = extract_first_json(json_str)
         except Exception as e:
@@ -99,7 +99,7 @@ async def answer_query(payload: AnswerQueryRequest):
             raise HTTPException(status_code=502, detail="Refiner returned invalid JSON")
 
         # Ensure safety block presence/consistency
-        from app.chains.safety import safety_footer
+
         if "safety" not in obj or not isinstance(obj["safety"], dict):
             obj["safety"] = safety_footer()
         else:
