@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, constr
-from typing import List, Optional
+from typing import List, Optional, Any
 
 class MedicineItem(BaseModel):
     name: constr(strip_whitespace=True, min_length=1)
@@ -27,6 +27,8 @@ class SummarizeResponse(BaseModel):
 class AnswerQueryRequest(BaseModel):
     query: constr(strip_whitespace=True, min_length=3)
     locale: str = Field(default="en-IN")
+    # NEW: a JSON object containing the prescription summary you previously generated
+    prescription_summary: Optional[dict[str, Any]] = None
 
 class AnswerQueryResponse(BaseModel):
     answer: str

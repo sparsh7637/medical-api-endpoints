@@ -8,9 +8,10 @@ from app.chains.schemas import (
 )
 from app.chains.safety import prefilter, safety_footer
 from app.chains.medical_model import run_summarize, run_qa
-from app.chains.gpt_refiner import refine_text
+from app.chains.gpt_refiner import refine_prescription_to_json, refine_answer_to_json
 from app.chains import retrieval as med_retrieval
-from app.utils.json_extract import extract_first_json  # <-- NEW: robust JSON extractor
+from app.utils.json_extract import extract_first_json
+from app.utils.prescription_context import flatten_prescription_context
 import json
 
 app = FastAPI(title="Medical Assistant API (LangChain via HF Endpoints)", version="1.0.0")
@@ -34,19 +35,20 @@ async def summarize_prescription(payload: SummarizeRequest):
         raise HTTPException(status_code=400, detail=msg)
 
     try:
-        llm_json = run_summarize(payload.text)
+        # 1) MEDICAL MODEL → paragraph draft
+        draft_paragraph = run_summarize(payload.text)
 
-        # --- Hardened parsing: accept pure JSON or salvage from fenced/wrapped output ---
+        # 2) GPT-OSS REFINER → STRICT JSON
+        json_str = refine_prescription_to_json(draft_paragraph)
+
+        # 3) Parse/validate JSON
         try:
-            data = extract_first_json(llm_json)
+            data = extract_first_json(json_str)
         except Exception as e:
-            logger.error(f"JSON parse failed: {e}; raw=\n{llm_json}")
-            raise HTTPException(status_code=502, detail="Model returned invalid JSON")
+            logger.error(f"JSON parse failed: {e}; raw=\n{json_str}")
+            raise HTTPException(status_code=502, detail="Refiner returned invalid JSON")
 
-        # Ensure disclaimer is always present
         data.setdefault("disclaimer", safety_footer()["disclaimer"])
-
-        # Pydantic validation of the final structure
         validated = PrescriptionSummary(**data)
         return SummarizeResponse(summary=validated)
 
@@ -63,12 +65,57 @@ async def answer_query(payload: AnswerQueryRequest):
         raise HTTPException(status_code=400, detail=msg)
 
     try:
-        context_snippets = med_retrieval.search(payload.query)
-        context = "\n".join(context_snippets)
-        draft = run_qa(payload.query, context=context)
-        refined = refine_text(draft)
-        safety = safety_footer()
-        return AnswerQueryResponse(answer=refined.strip(), safety=safety, sources=context_snippets)
+        # (A) In-code Indian-meds context (as before)
+        med_snippets = med_retrieval.search(payload.query)
+        med_context = "\n".join(med_snippets)
+
+        # (B) NEW: Context from the provided prescription summary (if any)
+        presc_context_str = ""
+        presc_sources: list[str] = []
+        if payload.prescription_summary:
+            try:
+                presc_context_str, presc_sources = flatten_prescription_context(payload.prescription_summary)
+            except Exception as e:
+                logger.warning(f"Unable to parse prescription_summary; proceeding without it. err={e}")
+
+        # (C) Merge contexts: prescription context first, then in-code meds hints
+        merged_context = "\n".join([s for s in [presc_context_str, med_context] if s])
+
+        # 1) MEDICAL MODEL → paragraph draft (now with merged context)
+        draft_paragraph = run_qa(payload.query, context=merged_context)
+
+        # 2) GPT-OSS REFINER → STRICT JSON (AnswerQueryResponse schema)
+        #    Pass sources as text so refiner can return them; also backfill later if missing
+        all_sources = presc_sources + med_snippets
+        sources_text = "\n".join(all_sources)
+        json_str = refine_answer_to_json(draft_paragraph, sources_text=sources_text)
+
+        # 3) Parse JSON and finalize
+        from app.utils.json_extract import extract_first_json
+        try:
+            obj = extract_first_json(json_str)
+        except Exception as e:
+            logger.error(f"JSON parse failed: {e}; raw=\n{json_str}")
+            raise HTTPException(status_code=502, detail="Refiner returned invalid JSON")
+
+        # Ensure safety block presence/consistency
+        from app.chains.safety import safety_footer
+        if "safety" not in obj or not isinstance(obj["safety"], dict):
+            obj["safety"] = safety_footer()
+        else:
+            sf = safety_footer()
+            obj["safety"].setdefault("disclaimer", sf["disclaimer"])
+            obj["safety"].setdefault("emergency", sf["emergency"])
+            obj["safety"].setdefault("version", sf["version"])
+
+        # Ensure sources array exists; if refiner omitted, use our merged sources
+        if "sources" not in obj or not isinstance(obj["sources"], list):
+            obj["sources"] = all_sources
+
+        # Pydantic validation to guarantee contract
+        validated = AnswerQueryResponse(**obj)
+        return validated
+
     except HTTPException:
         raise
     except Exception as e:
