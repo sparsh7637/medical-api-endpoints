@@ -1,45 +1,30 @@
+# 🏥 Medical Assistant API
 
+This project is a **microservice-based medical assistant API** built with **FastAPI**, **LangChain**, and **Hugging Face-hosted models**. It helps:
 
-# 🏥 Medical Assistant API (LangChain + FastAPI + Hugging Face)
-
-This project implements a **microservice-based medical assistant API** that leverages **LangChain** and **Hugging Face-hosted models** to provide two key services:
-
-1. **Summarize medical prescriptions** into structured JSON.
-2. **Answer patient queries** in natural, patient-friendly language tailored to the **Indian healthcare context**.
+1. **Summarize prescriptions** into a clean structured JSON.
+2. **Answer patient queries** in simple, safe, and patient-friendly language — with special focus on **Indian medicines** and **rural healthcare needs**.
 
 ---
 
-## 🚀 Architecture Overview
+## 🚀 Features
 
-```mermaid
-flowchart TD
-    A[User Input] -->|OCR text or query| B[FastAPI Server]
-    B -->|/summarize-prescription| C[LangChain Prompt Builder]
-    B -->|/answer-query| D[LangChain Prompt Builder]
-    
-    C --> E[II-Medical-8B Model (HF repo_id)]
-    D --> E
-    
-    E -->|Draft output| F[GPT-SS Refiner (HF repo_id)]
-    
-    F -->|Refined text| G[Post-processing: Safety + Validation]
-    
-    G --> H[API Response JSON]
-```
+* **LangChain orchestration** with two models:
 
-### Key Layers
+  * `Intelligent-Internet/II-Medical-8B` → medical reasoning (draft responses in paragraphs).
+  * `gpt-oss` (configurable) → refines drafts into **structured JSON** for reliable output.
+* **Two API endpoints**:
 
-* **FastAPI**: lightweight web microservice, serving endpoints.
-* **LangChain**: orchestrates prompt templates, model calls, and output parsing.
-* **Models**:
+  * `/summarize-prescription`: Summarize OCR text of prescriptions into structured fields (medicines, dosage, frequency, instructions, advice).
+  * `/answer-query`: Answer natural language queries, using the prescription summary (if provided) and Indian-medicine context.
+* **Safety Layer**:
 
-  * [`Intelligent-Internet/II-Medical-8B`](https://huggingface.co/Intelligent-Internet/II-Medical-8B) → medical reasoning.
-  * `gpt-ss` (any open-source GPT refiner) → makes responses more natural and patient-friendly.
-* **Utilities**:
+  * Prefilter unsafe queries.
+  * Always append disclaimers and emergency contacts.
+* **Rural-friendly context**:
 
-  * JSON extractor to handle noisy model outputs.
-  * Safety filter to block harmful queries.
-  * In-code Indian medicine mini-knowledge base.
+  * Indian medicine database built-in.
+  * Handles queries in simple English/Hinglish.
 
 ---
 
@@ -48,148 +33,50 @@ flowchart TD
 ```
 app/
  ├─ chains/
- │   ├─ prompts.py         # All system + user prompt templates
- │   ├─ schemas.py         # Pydantic models for request/response validation
- │   ├─ safety.py          # Prefilter for unsafe queries, safety footer
- │   ├─ retrieval.py       # In-memory hints for Indian medicines
- │   ├─ medical_model.py   # Chains for summarization and Q&A
- │   └─ gpt_refiner.py     # Refiner chain for patient-friendly answers
+ │   ├─ prompts.py             # Prompt templates for medical & refiner models
+ │   ├─ schemas.py             # Pydantic models for requests/responses
+ │   ├─ safety.py              # Prefilter and safety footer
+ │   ├─ retrieval.py           # Indian medicine hints
+ │   ├─ medical_model.py       # Medical model draft chains
+ │   └─ gpt_refiner.py         # Refiner model JSON-output chains
  │
  ├─ models/
- │   ├─ ii_medical_loader.py  # II-Medical-8B loader (HF repo_id)
- │   └─ gpt_ss_loader.py      # GPT-SS loader (HF repo_id)
+ │   ├─ ii_medical_loader.py   # Hugging Face II-Medical-8B loader
+ │   └─ gpt_ss_loader.py       # Hugging Face GPT-OSS refiner loader
  │
  ├─ utils/
- │   └─ json_extract.py    # Robust JSON extraction utility
+ │   ├─ json_extract.py        # Robust JSON extraction helper
+ │   └─ prescription_context.py# Flattens prescription summary into context lines
  │
- ├─ config.py              # Environment & settings
- ├─ logging_conf.py        # Loguru logger setup
- └─ main.py                # FastAPI entrypoint with endpoints
+ ├─ config.py                  # Env config
+ ├─ logging_conf.py            # Loguru logging
+ └─ main.py                    # FastAPI endpoints
 ```
 
 ---
 
-## ⚡ Endpoints
+## ⚙️ Setup
 
-### 1. `/health`
+### 1. Clone and create venv
 
-**Method:** `GET`
-**Purpose:** Simple liveness probe.
-**Response:**
-
-```json
-{"status":"ok"}
+```bash
+git clone https://github.com/sparsh7637/medical-api-endpoints
+cd medical-assistant-api
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
 
----
+### 2. Install dependencies
 
-### 2. `/summarize-prescription`
-
-**Method:** `POST`
-**Input:**
-
-```json
-{
-  "text": "Patient: R Gupta. Dx: URTI. Rx: Azithral 500 OD x 3 days; Dolo 650 SOS fever; Omez 20 OD before breakfast 5d."
-}
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-**Process:**
 
-1. Prefilter for unsafe content.
-2. Send OCR text + instructions to II-Medical-8B.
-3. Parse strict JSON (robust extractor handles noisy wrappers).
-4. Validate against `PrescriptionSummary` schema.
-5. Add disclaimer if missing.
+### 3. Environment variables
 
-**Output (sample):**
-
-```json
-{
-  "summary": {
-    "patient_name": "R Gupta",
-    "diagnosis_or_complaints": "URTI",
-    "medicines": [
-      {"name": "Azithral", "dosage": "500 mg", "frequency": "OD", "duration": "3 days", "instructions": null},
-      {"name": "Dolo 650", "dosage": "650 mg", "frequency": "SOS", "duration": null, "instructions": "fever"},
-      {"name": "Omez", "dosage": "20 mg", "frequency": "OD", "duration": "5 days", "instructions": "before breakfast"}
-    ],
-    "tests_or_followup": null,
-    "red_flags": null,
-    "generic_advice": "Complete antibiotic course, follow up if symptoms persist.",
-    "disclaimer": "Informational only; not a substitute for professional medical advice."
-  }
-}
-```
-
----
-
-### 3. `/answer-query`
-
-**Method:** `POST`
-**Input:**
-
-```json
-{
-  "query": "Can I take Dolo 650 with milk?"
-}
-```
-
-**Process:**
-
-1. Prefilter unsafe text.
-2. Retrieve relevant hints from in-code Indian meds DB.
-3. Send query + context to II-Medical-8B.
-4. Refine draft with GPT-SS into friendly patient-facing language.
-5. Attach safety block + sources.
-
-**Output (sample):**
-
-```json
-{
-  "answer": "You can take Dolo 650 with milk; it does not reduce its effect. It is usually well tolerated. If you have persistent fever or severe symptoms, consult a doctor. For information only; not a substitute for professional medical advice.",
-  "safety": {
-    "disclaimer": "Informational only; not a substitute for professional medical advice.",
-    "emergency": "If this is an emergency in India, call 112 or visit the nearest emergency department.",
-    "version": "v1"
-  },
-  "sources": [
-    "Dolo 650 (Paracetamol) – Fever/Pain; typical: 650 mg every 6–8 hours (max 3 g/day)"
-  ]
-}
-```
-
----
-
-## 🔒 Safety Features
-
-* **Prefilter** blocks dangerous requests (e.g., overdose instructions, self-harm queries).
-* **Refiner** simplifies language and ensures disclaimers.
-* **Safety footer** adds:
-
-  * Disclaimer
-  * India-specific emergency contact (112)
-  * Versioning info
-
----
-
-## 💊 Indian Medicines Knowledge Base
-
-A tiny in-memory dictionary is used to give context for common Indian drugs:
-
-* **Dolo 650 (Paracetamol)** → Fever, pain relief
-* **Azithral 500 (Azithromycin)** → Bacterial infections
-* **Allegra 120 (Fexofenadine)** → Allergic rhinitis
-* **Omez 20 (Omeprazole)** → Acidity/GERD
-* **ORS Powder** → Rehydration
-
-This list is not exhaustive but helps ground the model.
-
----
-
-## ⚙️ Environment Setup
-
-`.env` file:
+Create `.env`:
 
 ```ini
 HF_TOKEN=hf_xxx_your_token
@@ -198,35 +85,139 @@ APP_HOST=127.0.0.1
 APP_PORT=8080
 ```
 
-Install and run:
+### 4. Run locally
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
-Swagger UI: [http://127.0.0.1:8080/docs](http://127.0.0.1:8080/docs)
+---
+
+## 📡 API Endpoints
+
+### `GET /health`
+
+Quick liveness probe.
+
+```json
+{"status":"ok"}
+```
 
 ---
 
-## 📌 Key Notes
+### `POST /summarize-prescription`
 
-* **Independence of Endpoints**:
+**Input**: OCR text from prescription.
 
-  * `/summarize-prescription` does *not* automatically feed into `/answer-query`.
-  * Q\&A only uses query text + small medicine DB.
-  * If needed, you can extend it to use the last summary as context.
+```json
+{
+  "text": "Patient: Suresh Kumar. Dx: Acute Gastritis. Rx: Pantocid D 40 mg OD before breakfast x 7 days; Sucralfate syrup 2 tsp TID before meals x 10 days; ORS powder as needed for dehydration."
+}
+```
 
-* **Hugging Face Integration**:
+**Response** (structured summary):
 
-  * Uses `repo_id` with `HuggingFaceEndpoint` + `ChatHuggingFace`.
-  * No local model downloads, only API calls.
-
-* **Robustness**:
-
-  * JSON-extractor utility ensures summaries don’t break when model adds `<think>`/markdown.
-  * Stop sequences and strict prompts reduce formatting drift.
+```json
+{
+  "summary": {
+    "patient_name": "Suresh Kumar",
+    "diagnosis_or_complaints": "Acute Gastritis",
+    "medicines": [
+      {
+        "name": "Pantocid D",
+        "dosage": "40 mg",
+        "frequency": "once daily",
+        "duration": "7 days",
+        "instructions": "before breakfast"
+      },
+      {
+        "name": "Sucralfate syrup",
+        "dosage": "2 tsp",
+        "frequency": "three times daily",
+        "duration": "10 days",
+        "instructions": "before meals"
+      },
+      {
+        "name": "ORS powder",
+        "dosage": null,
+        "frequency": "as needed",
+        "duration": null,
+        "instructions": "for dehydration"
+      }
+    ],
+    "tests_or_followup": null,
+    "red_flags": null,
+    "generic_advice": "Avoid spicy food and maintain hydration.",
+    "disclaimer": "This information is for general informational purposes only and does not constitute medical advice."
+  }
+}
+```
 
 ---
+
+### `POST /answer-query`
+
+**Input**: User query + optional prescription summary JSON.
+
+```json
+{
+  "query": "Can I drink tea in the morning if I am taking Pantocid D before breakfast?",
+  "prescription_summary": {
+    "summary": {
+      "patient_name": "Suresh Kumar",
+      "diagnosis_or_complaints": "Acute Gastritis",
+      "medicines": [
+        {
+          "name": "Pantocid D",
+          "dosage": "40 mg",
+          "frequency": "once daily",
+          "duration": "7 days",
+          "instructions": "before breakfast"
+        },
+        {
+          "name": "Sucralfate syrup",
+          "dosage": "2 tsp",
+          "frequency": "three times daily",
+          "duration": "10 days",
+          "instructions": "before meals"
+        },
+        {
+          "name": "ORS powder",
+          "dosage": null,
+          "frequency": "as needed",
+          "duration": null,
+          "instructions": "for dehydration"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Response**:
+
+```json
+{
+  "answer": "Pantocid D should be taken on an empty stomach. Wait about 30 minutes before tea or breakfast. If stomach burning continues, consult your doctor.",
+  "safety": {
+    "disclaimer": "Informational only; not a substitute for professional medical advice.",
+    "emergency": "If this is an emergency in India, call 112 or visit the nearest emergency department.",
+    "version": "v1"
+  },
+  "sources": [
+    "Pantocid D (40 mg, once daily, 7 days, before breakfast)",
+    "Sucralfate syrup (2 tsp, three times daily, 10 days, before meals)"
+  ]
+}
+```
+
+
+
+## 🔒 Safety Mechanisms
+
+* **Prefilter**: Blocks unsafe queries (self-harm, overdose).
+* **Refiner**: GPT-OSS ensures consistent JSON + patient-friendly tone.
+* **Safety Footer**: Always appends disclaimers and India-specific emergency contact.
+
+
 
